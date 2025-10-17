@@ -1,3 +1,5 @@
+# ... autres imports
+import os
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from sqlmodel import Session
 from app.core.database import get_session
@@ -11,17 +13,17 @@ async def import_csv(file: UploadFile = File(...), session: Session = Depends(ge
     """
     Importe un fichier CSV pour le traitement et le stockage dans la base de données.
     """
-    if not file.filename.endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Le fichier doit être au format CSV.")
+    # ... (vérification du format du fichier)
 
     content = await file.read()
 
     repo = ActivityRepository(session)
-    processor = CSVProcessor(repo)
+    log_file_path = os.path.join(os.getcwd(), "import_errors.log")
+    processor = CSVProcessor(repo, log_file_path) # Passe le chemin du fichier de journal
     
     try:
         processor.process_and_store(content)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur lors du traitement du fichier : {str(e)}")
 
-    return {"message": f"Fichier {file.filename} importé et traité avec succès."}
+    return {"message": f"Fichier {file.filename} importé et traité avec succès. Les erreurs ont été enregistrées dans {log_file_path}."}
