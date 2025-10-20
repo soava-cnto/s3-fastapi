@@ -15,21 +15,25 @@ class CSVProcessor:
 
     def process_and_store(self, file_content: bytes):
         content_string = file_content.decode('utf-8')
-        
-        # Pré-traitement pour corriger les motifs problématiques
-        # Remplacer les motifs identifiés par des barres obliques pour ne pas les confondre avec des virgules
+
+        # Pré-traitement pour corriger les motifs problématiques avant de lire le CSV
         content_string = re.sub(r'("compte",")', r'"compte /', content_string)
         content_string = re.sub(r'(bloqué, code)', r'bloqué / code', content_string)
         content_string = re.sub(r'(emploi, non)', r'emploi / non', content_string)
         content_string = re.sub(r'(Transaction P2P, CASH IN, CASH OUT,)', r'Transaction P2P / CASH IN / CASH OUT,', content_string)
-        
+        content_string = re.sub(r'(Simple-Code oublié, compte non bloqué,)', r' Simple-Code oublié/ compte non bloqué,', content_string)
+        content_string = re.sub(r'(Réinitialisation Déblocage-Code oublié, compte bloqué,)', r'Réinitialisation Déblocage-Code oublié/ compte bloqué,', content_string)
+
+        # Créer un objet StringIO pour traiter le CSV après remplacement des motifs
         file_like_object = StringIO(content_string)
         csv_reader = csv.DictReader(file_like_object)
-        
-        activities_to_create: List[Activity] = []
 
-        # Créer un dictionnaire de mapping pour assurer la correspondance correcte
-        # entre les en-têtes du CSV et les noms des colonnes de la base de données.
+        activities_to_create: List[Activity] = []
+        log_batch = []  # Pour les erreurs de log, à écrire en lot
+        BATCH_SIZE = 50000  # Taille du lot pour les insertions
+        MAX_LOG_SIZE = 100  # Taille du lot pour les logs
+
+        # Dictionnaire de correspondance entre les entêtes CSV et les colonnes de la base de données
         header_mapping = {
             'Numeroactivite': 'numero_activite',
             'Datecreation': 'date_creation',
@@ -44,8 +48,8 @@ class CSVProcessor:
             'Typeactivite': 'type_activite',
             'Activite': 'activite',
             'Raison': 'raison',
-            'SousRaison': 'sous_raison', 
-            # 'Sous Raison': 'sous_raison',
+            'SousRaison': 'sous_raison',
+            'Sous Raison': 'sous_raison',
             'Details': 'details',
             'Datedebutactivite': 'date_debut_activite',
             'Datefinactivite': 'date_fin_activite',
@@ -58,46 +62,64 @@ class CSVProcessor:
             'Msisdn': 'msisdn',
         }
 
-        with open(self.log_file_path, 'a') as log_file: # Ouvre le fichier en mode ajout
+        with open(self.log_file_path, 'a') as log_file:
             for row in csv_reader:
                 row_columns = len(row)
-                expected_columns = len(Activity.__table__.columns) - 1
-                
+                expected_columns = len(Activity.__table__.columns) - 1  # Nombre de colonnes attendues
+
+                # Vérification du nombre de colonnes
                 if row_columns != expected_columns:
                     log_message = f"Skipping row due to inconsistent number of columns. Expected {expected_columns}, got {row_columns}: {row}\n"
-                    log_file.write(log_message)
-                    continue # Passer à la ligne suivante
+                    log_batch.append(log_message)
+
+                    # Enregistrer le log en paquet si la taille maximale est atteinte
+                    if len(log_batch) >= MAX_LOG_SIZE:
+                        log_file.writelines(log_batch)
+                        log_batch.clear()
+                    continue  # Passer à la ligne suivante si le nombre de colonnes est incorrect
 
                 processed_row = {}
-                
-                # Utiliser le mapping pour construire le dictionnaire processed_row
                 for key, value in row.items():
                     if key in header_mapping:
                         db_column_name = header_mapping[key]
                         processed_row[db_column_name] = None if value == '' else value
                     else:
-                        # Gérer les en-têtes inconnus si nécessaire
-                        print(f"Warning: Unknown CSV header '{key}'")
-                
-                # Conversion des chaînes de caractères en types Python appropriés
-                for key in ["date_creation", "date_cloture", "date_debut_activite", "date_fin_activite"]:
-                    if processed_row.get(key):
-                        try:
-                            processed_row[key] = datetime.strptime(processed_row[key], '%Y-%m-%d %H:%M:%S')
-                        except ValueError:
-                            processed_row[key] = None
-                
-                # Conversion de nb_relance en int
+                        print(f"Warning: Unknown CSV header '{key}'")  # Avertir si une colonne inconnue est trouvée
+
+                # Conversion des dates
+                for date_key in ["date_creation", "date_cloture", "date_debut_activite", "date_fin_activite"]:
+                    if processed_row.get(date_key):
+                        processed_row[date_key] = self.convert_date(processed_row[date_key])
+
+                # Conversion de 'nb_relance' en int
                 if processed_row.get('nb_relance'):
-                    try:
-                        processed_row['nb_relance'] = int(processed_row['nb_relance'])
-                    except (ValueError, TypeError):
-                        processed_row['nb_relance'] = None
-                
-                # Créer l'objet Activity et l'ajouter à la liste
+                    processed_row['nb_relance'] = self.convert_int(processed_row['nb_relance'])
+
+                # Créer l'objet Activity et ajouter à la liste des activités
                 activity = Activity(**processed_row)
                 activities_to_create.append(activity)
 
-        if activities_to_create:
-            self.repo.create_multiple(activities_to_create)
+                # Si le batch atteint la taille maximale, insérer les données
+                if len(activities_to_create) >= BATCH_SIZE:
+                    self.repo.create_multiple(activities_to_create)
+                    activities_to_create.clear()  # Vider la liste après l'insertion
 
+            # Insérer les activités restantes après la boucle
+            if activities_to_create:
+                self.repo.create_multiple(activities_to_create)
+
+            # Enregistrer les logs restants si nécessaire
+            if log_batch:
+                log_file.writelines(log_batch)
+
+    def convert_date(self, value):
+        try:
+            return datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            return None
+
+    def convert_int(self, value):
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return None
