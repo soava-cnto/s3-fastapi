@@ -7,6 +7,7 @@ from typing import List
 from datetime import datetime
 import re
 import os
+from sqlalchemy import delete
 
 class CSVProcessor:
     def __init__(self, repo: ActivityRepository, log_file_path: str = "import_errors.log"):
@@ -14,7 +15,11 @@ class CSVProcessor:
         self.log_file_path = log_file_path
 
     def process_and_store(self, file_content: bytes):
-        content_string = file_content.decode('utf-8')
+        # Truncate de la table avant l'insertion des nouvelles données
+        self.repo.session.exec(delete(Activity))
+        self.repo.session.commit()
+
+        content_string = file_content.decode('ISO-8859-1')
 
         # Pré-traitement pour corriger les motifs problématiques avant de lire le CSV
         content_string = re.sub(r'("compte",")', r'"compte /', content_string)
@@ -22,6 +27,7 @@ class CSVProcessor:
         content_string = re.sub(r'(emploi, non)', r'emploi / non', content_string)
         content_string = re.sub(r'(Transaction P2P, CASH IN, CASH OUT,)', r'Transaction P2P / CASH IN / CASH OUT,', content_string)
         content_string = re.sub(r'(Simple-Code oublié, compte non bloqué,)', r' Simple-Code oublié/ compte non bloqué,', content_string)
+        content_string = re.sub(r'(Déblocage Simple-Compte bloqué, code connu,)', r' Déblocage Simple-Compte bloqué/ code connu,', content_string)
         content_string = re.sub(r'(Réinitialisation Déblocage-Code oublié, compte bloqué,)', r'Réinitialisation Déblocage-Code oublié/ compte bloqué,', content_string)
 
         # Créer un objet StringIO pour traiter le CSV après remplacement des motifs
@@ -35,32 +41,59 @@ class CSVProcessor:
 
         # Dictionnaire de correspondance entre les entêtes CSV et les colonnes de la base de données
         header_mapping = {
-            'Numeroactivite': 'numero_activite',
-            'Datecreation': 'date_creation',
+            'NumeroActivite': 'numero_activite',
+            'DateCreation': 'date_creation',
             'Createur': 'createur',
-            'Groupecreateur': 'groupe_createur',
+            'GroupeCreateur': 'groupe_createur',
             'Statut': 'statut',
-            'Groupeassigne': 'groupe_assigne',
-            'Utilisateurassigne': 'utilisateur_assigne',
-            'Datecloture': 'date_cloture',
-            'Groupetraiteur': 'groupe_traiteur',
-            'Utilisateurtraiteur': 'utilisateur_traiteur',
-            'Typeactivite': 'type_activite',
+            'GroupeAssigne': 'groupe_assigne',
+            'UtilisateurAssigne': 'utilisateur_assigne',
+            'DateCloture': 'date_cloture',
+            'GroupeTraiteur': 'groupe_traiteur',
+            'UtilisateurTraiteur': 'utilisateur_traiteur',
+            'TypeActivite': 'type_activite',
             'Activite': 'activite',
             'Raison': 'raison',
             'SousRaison': 'sous_raison',
             'Sous Raison': 'sous_raison',
             'Details': 'details',
-            'Datedebutactivite': 'date_debut_activite',
-            'Datefinactivite': 'date_fin_activite',
-            'Modifiepar': 'modifie_par',
+            'DateDebutActivite': 'date_debut_activite',
+            'DateFinActivite': 'date_fin_activite',
+            'ModifiePar': 'modifie_par',
             'Canal': 'canal',
             'Priorite': 'priorite',
-            'Numcompteclient': 'num_compte_client',
+            'NumCompteClient': 'num_compte_client',
             'NbRelance': 'nb_relance',
-            'Numeroservice': 'numero_service',
-            'Msisdn': 'msisdn',
+            'NumeroService': 'numero_service',
+            'MSISDN': 'msisdn',
         }
+        # header_mapping = {
+        #     'Numeroactivite': 'numero_activite',
+        #     'Datecreation': 'date_creation',
+        #     'Createur': 'createur',
+        #     'Groupecreateur': 'groupe_createur',
+        #     'Statut': 'statut',
+        #     'Groupeassigne': 'groupe_assigne',
+        #     'Utilisateurassigne': 'utilisateur_assigne',
+        #     'Datecloture': 'date_cloture',
+        #     'Groupetraiteur': 'groupe_traiteur',
+        #     'Utilisateurtraiteur': 'utilisateur_traiteur',
+        #     'Typeactivite': 'type_activite',
+        #     'Activite': 'activite',
+        #     'Raison': 'raison',
+        #     'SousRaison': 'sous_raison',
+        #     'Sous Raison': 'sous_raison',
+        #     'Details': 'details',
+        #     'Datedebutactivite': 'date_debut_activite',
+        #     'Datefinactivite': 'date_fin_activite',
+        #     'Modifiepar': 'modifie_par',
+        #     'Canal': 'canal',
+        #     'Priorite': 'priorite',
+        #     'Numcompteclient': 'num_compte_client',
+        #     'NbRelance': 'nb_relance',
+        #     'Numeroservice': 'numero_service',
+        #     'Msisdn': 'msisdn',
+        # }
 
         with open(self.log_file_path, 'a') as log_file:
             for row in csv_reader:

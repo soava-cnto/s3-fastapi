@@ -27,3 +27,5 @@ async def import_csv(file: UploadFile = File(...), session: Session = Depends(ge
         raise HTTPException(status_code=500, detail=f"Erreur lors du traitement du fichier : {str(e)}")
 
     return {"message": f"Fichier {file.filename} importé et traité avec succès. Les erreurs ont été enregistrées dans {log_file_path}."}
+
+

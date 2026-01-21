@@ -2,7 +2,7 @@ from sqlmodel import SQLModel, Field
 from datetime import datetime
 
 class Activity(SQLModel, table=True):
-    __tablename__ = "activities"
+    __tablename__ = "nouvelle_table"
 
     id: int | None = Field(default=None, primary_key=True)
     numero_activite: str | None = Field(default=None, index=True)
