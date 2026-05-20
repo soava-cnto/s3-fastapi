@@ -10,9 +10,10 @@ import os
 from sqlalchemy import delete
 
 class CSVProcessor:
-    def __init__(self, repo: ActivityRepository, log_file_path: str = "import_errors.log"):
+    def __init__(self, repo: ActivityRepository, log_file_path: str = "import_errors.log", file_type: str = "history"):
         self.repo = repo
         self.log_file_path = log_file_path
+        self.file_type = file_type  # 'history' ou 'monthly'
 
     def process_and_store(self, file_content: bytes):
         # Truncate de la table avant l'insertion des nouvelles données
@@ -22,13 +23,20 @@ class CSVProcessor:
         content_string = file_content.decode('ISO-8859-1')
 
         # Pré-traitement pour corriger les motifs problématiques avant de lire le CSV
-        content_string = re.sub(r'("compte",")', r'"compte /', content_string)
-        content_string = re.sub(r'(bloqué, code)', r'bloqué / code', content_string)
-        content_string = re.sub(r'(emploi, non)', r'emploi / non', content_string)
-        content_string = re.sub(r'(Transaction P2P, CASH IN, CASH OUT,)', r'Transaction P2P / CASH IN / CASH OUT,', content_string)
-        content_string = re.sub(r'(Simple-Code oublié, compte non bloqué,)', r' Simple-Code oublié/ compte non bloqué,', content_string)
-        content_string = re.sub(r'(Déblocage Simple-Compte bloqué, code connu,)', r' Déblocage Simple-Compte bloqué/ code connu,', content_string)
-        content_string = re.sub(r'(Réinitialisation Déblocage-Code oublié, compte bloqué,)', r'Réinitialisation Déblocage-Code oublié/ compte bloqué,', content_string)
+        # Remplacer les virgules problématiques par des slashes pour éviter la division de colonnes
+        
+        # Pattern générique : remplacer ', compte bloqué' par '/ compte bloqué'
+        # content_string = re.sub(r',\s*compte bloqué', r'/ compte bloqué', content_string)
+        content_string = re.sub(r',\s', r'/ ', content_string)
+        
+        # Autres patterns problématiques
+        # content_string = re.sub(r'("compte",")', r'"compte /', content_string)
+        # content_string = re.sub(r'(bloqué, code)', r'bloqué / code', content_string)
+        # content_string = re.sub(r'(emploi, non)', r'emploi / non', content_string)
+        # content_string = re.sub(r'(Transaction P2P, CASH IN, CASH OUT,)', r'Transaction P2P / CASH IN / CASH OUT,', content_string)
+        # content_string = re.sub(r'(Simple-Code oublié, compte non bloqué,)', r'Simple-Code oublié / compte non bloqué,', content_string)
+        # content_string = re.sub(r'(Déblocage Simple-Compte bloqué, code connu,)', r'Déblocage Simple-Compte bloqué / code connu,', content_string)
+        # content_string = re.sub(r'(Réinitialisation Déblocage-Code oublié, compte bloqué,)', r'Réinitialisation Déblocage-Code oublié/ compte bloqué,', content_string)
 
         # Créer un objet StringIO pour traiter le CSV après remplacement des motifs
         file_like_object = StringIO(content_string)
@@ -40,7 +48,7 @@ class CSVProcessor:
         MAX_LOG_SIZE = 100  # Taille du lot pour les logs
 
         # Dictionnaire de correspondance entre les entêtes CSV et les colonnes de la base de données
-        header_mapping = {
+        header_mapping_history = {
             'NumeroActivite': 'numero_activite',
             'DateCreation': 'date_creation',
             'Createur': 'createur',
@@ -67,33 +75,37 @@ class CSVProcessor:
             'NumeroService': 'numero_service',
             'MSISDN': 'msisdn',
         }
-        # header_mapping = {
-        #     'Numeroactivite': 'numero_activite',
-        #     'Datecreation': 'date_creation',
-        #     'Createur': 'createur',
-        #     'Groupecreateur': 'groupe_createur',
-        #     'Statut': 'statut',
-        #     'Groupeassigne': 'groupe_assigne',
-        #     'Utilisateurassigne': 'utilisateur_assigne',
-        #     'Datecloture': 'date_cloture',
-        #     'Groupetraiteur': 'groupe_traiteur',
-        #     'Utilisateurtraiteur': 'utilisateur_traiteur',
-        #     'Typeactivite': 'type_activite',
-        #     'Activite': 'activite',
-        #     'Raison': 'raison',
-        #     'SousRaison': 'sous_raison',
-        #     'Sous Raison': 'sous_raison',
-        #     'Details': 'details',
-        #     'Datedebutactivite': 'date_debut_activite',
-        #     'Datefinactivite': 'date_fin_activite',
-        #     'Modifiepar': 'modifie_par',
-        #     'Canal': 'canal',
-        #     'Priorite': 'priorite',
-        #     'Numcompteclient': 'num_compte_client',
-        #     'NbRelance': 'nb_relance',
-        #     'Numeroservice': 'numero_service',
-        #     'Msisdn': 'msisdn',
-        # }
+        
+        header_mapping_monthly = {
+            'Numeroactivite': 'numero_activite',
+            'Datecreation': 'date_creation',
+            'Createur': 'createur',
+            'Groupecreateur': 'groupe_createur',
+            'Statut': 'statut',
+            'Groupeassigne': 'groupe_assigne',
+            'Utilisateurassigne': 'utilisateur_assigne',
+            'Datecloture': 'date_cloture',
+            'Groupetraiteur': 'groupe_traiteur',
+            'Utilisateurtraiteur': 'utilisateur_traiteur',
+            'Typeactivite': 'type_activite',
+            'Activite': 'activite',
+            'Raison': 'raison',
+            'SousRaison': 'sous_raison',
+            'Sous Raison': 'sous_raison',
+            'Details': 'details',
+            'Datedebutactivite': 'date_debut_activite',
+            'Datefinactivite': 'date_fin_activite',
+            'Modifiepar': 'modifie_par',
+            'Canal': 'canal',
+            'Priorite': 'priorite',
+            'Numcompteclient': 'num_compte_client',
+            'NbRelance': 'nb_relance',
+            'Numeroservice': 'numero_service',
+            'Msisdn': 'msisdn',
+        }
+        
+        # Sélectionner le bon mapping selon le type de fichier
+        header_mapping = header_mapping_monthly if self.file_type == "monthly" else header_mapping_history
 
         with open(self.log_file_path, 'a') as log_file:
             for row in csv_reader:
